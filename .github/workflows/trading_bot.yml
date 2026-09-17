@@ -1,0 +1,59 @@
+name: Scheduled Trading Bot Updates
+
+on:
+  schedule:
+    # 04:00 UTC = 09:30 AM IST (Monday to Friday) - Screener & Morning Check
+    - cron: '0 4 * * 1-5'
+    # 05:30 UTC = 11:00 AM IST (Monday to Friday) - Mid-Day Holdings Update
+    - cron: '30 5 * * 1-5'
+    # 10:30 UTC = 04:00 PM IST (Monday to Friday) - Post-Market Holdings Update
+    - cron: '30 10 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      bot_to_run:
+        description: 'Choose which bot to run manually'
+        required: true
+        default: 'dhan'
+        type: choice
+        options:
+          - dhan
+          - zerodha
+          - both
+
+jobs:
+  run-bots:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Run Dhan Bot
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'dhan' || inputs.bot_to_run == 'both' }}"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          DHAN_PIN: ${{ secrets.DHAN_PIN }}
+          DHAN_TOTP_SECRET: ${{ secrets.DHAN_TOTP_SECRET }}
+          SCREENER_URL: ${{ secrets.SCREENER_URL }}
+        run: |
+          uv run DhanBotnotokennew.py
+
+      - name: Run Zerodha Bot
+        if: "${{ inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'both' }}"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KITE_API_KEY: ${{ secrets.KITE_API_KEY }}
+          KITE_ACCESS_TOKEN: ${{ secrets.KITE_ACCESS_TOKEN }}
+        run: |
+          uv run ZerodhaBot.py
