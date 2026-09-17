@@ -1,0 +1,35 @@
+# ========================
+# 1. Environment & Secrets (NEVER upload to GitHub)
+# ========================
+.env
+.env.*
+*.env
+
+# ========================
+# 2. Virtual Environments
+# ========================
+.venv/
+env/
+venv/
+
+# ========================
+# 3. Python Cache & Build Files
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+dist/
+build/
+*.egg-info/
+
+# ========================
+# 4. Logs & Temp Files
+# ========================
+*.log
+*.tmp
+
+# ========================
+# 5. IDE / Editor Folders
+# ========================
+.vscode/
+.idea/
