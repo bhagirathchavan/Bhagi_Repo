@@ -1,47 +1,11 @@
 """
 Stock Runner: Telegram bot updates for your current holdings (via Zerodha
-Kite Connect). No auto-refresh, no screener - holdings only, using a
-manually-generated daily access token.
+Kite Connect) with 100% AUTOMATIC daily login using User ID, Password, and TOTP.
 
 RUNNING WITH UV (recommended - handles dependencies automatically)
 --------------------------------------------------------------
-This file declares its own dependencies below (the "# /// script" block).
 Just run:
-    uv run ZerodhaHoldingsBot.py
-uv will create an isolated environment with the right packages installed
-the first time you run it - no need for `pip install` or `uv add` at all.
-
-SETUP
------
-1. Get your Kite Connect API key from developers.kite.trade (create an app
-   if you haven't already).
-
-2. Generate today's access token manually:
-    - Visit: https://kite.trade/connect/login?v=3&api_key=YOUR_API_KEY
-    - Log in, approve the app - you'll be redirected to a URL containing
-      request_token=XXXX
-    - Exchange it for an access token (one-time, e.g. in a python shell):
-        from kiteconnect import KiteConnect
-        kite = KiteConnect(api_key="YOUR_API_KEY")
-        data = kite.generate_session("REQUEST_TOKEN_FROM_URL", api_secret="YOUR_API_SECRET")
-        print(data["access_token"])
-    - Kite access tokens expire daily (around 6 AM) - you'll need to repeat
-      this each morning and update .env.zerodha. (If you want this fully
-      automated via TOTP instead, say so and I'll wire that version back in.)
-
-3. Create a .env.zerodha file in the SAME folder you run this script from:
-    TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
-    TELEGRAM_CHAT_ID=123456789
-    KITE_API_KEY=your_kite_api_key
-    KITE_ACCESS_TOKEN=todays_generated_access_token
-
-   No quotes around values.
-
-4. Run manually to test:
-    uv run ZerodhaHoldingsBot.py
-
-5. Once it works, schedule it with cron / Windows Task Scheduler, or ask
-   me to wire in APScheduler cron jobs the same way as the Dhan bot.
+    uv run ZerodhaBot.py
 """
 
 # /// script
@@ -50,6 +14,7 @@ SETUP
 #     "requests",
 #     "kiteconnect",
 #     "python-dotenv",
+#     "pyotp",
 # ]
 # ///
 
@@ -58,13 +23,16 @@ import html
 import requests
 from dotenv import load_dotenv
 
-# Load this bot's own env file explicitly, so it never collides with
-# another bot's .env file sitting in the same folder (e.g. Dhan's .env.dhan).
+# Load this bot's own env file explicitly
 load_dotenv(dotenv_path="./.env.zerodha")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+KITE_USER_ID = os.getenv("KITE_USER_ID")
+KITE_PASSWORD = os.getenv("KITE_PASSWORD")
 KITE_API_KEY = os.getenv("KITE_API_KEY")
+KITE_API_SECRET = os.getenv("KITE_API_SECRET") or os.getenv("KIT_API_SECRET")
+KITE_TOTP_SECRET = os.getenv("KITE_TOTP_SECRET") or os.getenv("KITE_ACCESS_TOKEN")
 KITE_ACCESS_TOKEN = os.getenv("KITE_ACCESS_TOKEN")
 
 
@@ -72,8 +40,11 @@ def _debug_env_status():
     checks = {
         "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
         "TELEGRAM_CHAT_ID": TELEGRAM_CHAT_ID,
+        "KITE_USER_ID": KITE_USER_ID,
+        "KITE_PASSWORD": bool(KITE_PASSWORD),
         "KITE_API_KEY": KITE_API_KEY,
-        "KITE_ACCESS_TOKEN": KITE_ACCESS_TOKEN,
+        "KITE_API_SECRET": bool(KITE_API_SECRET),
+        "KITE_TOTP_SECRET": bool(KITE_TOTP_SECRET),
     }
     print("--- .env.zerodha load check ---")
     for k, v in checks.items():
@@ -102,29 +73,119 @@ def send_telegram_message(text: str):
 
 
 # ---------------------------------------------------------------------------
-# 2. HOLDINGS (Zerodha Kite Connect)
+# 2. AUTOMATIC LOGIN & TOKEN GENERATION
+# ---------------------------------------------------------------------------
+def generate_kite_access_token() -> str:
+    """
+    Logs into Zerodha Kite automatically using User ID, Password, and TOTP,
+    authorizes Kite Connect, and exchanges request_token for a fresh access_token.
+    """
+    if not all([KITE_USER_ID, KITE_PASSWORD, KITE_TOTP_SECRET, KITE_API_KEY, KITE_API_SECRET]):
+        raise ValueError(
+            "Missing credentials for auto-login. Please make sure KITE_USER_ID, "
+            "KITE_PASSWORD, KITE_TOTP_SECRET, KITE_API_KEY, and KITE_API_SECRET are set."
+        )
+
+    import pyotp
+    from urllib.parse import parse_qs, urlparse
+    from kiteconnect import KiteConnect
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    })
+
+    print("Logging in to Zerodha Kite...")
+    login_resp = session.post(
+        "https://kite.zerodha.com/api/login",
+        data={"user_id": KITE_USER_ID, "password": KITE_PASSWORD},
+        timeout=15,
+    )
+    login_data = login_resp.json()
+    if login_data.get("status") != "success":
+        raise Exception(f"Zerodha Login Failed: {login_data.get('message', login_resp.text)}")
+
+    request_id = login_data["data"]["request_id"]
+
+    # Generate 6-digit TOTP
+    clean_secret = KITE_TOTP_SECRET.replace(" ", "").strip()
+    totp = pyotp.TOTP(clean_secret)
+    twofa_code = totp.now()
+
+    print("Authenticating 2FA TOTP...")
+    twofa_resp = session.post(
+        "https://kite.zerodha.com/api/twofa",
+        data={
+            "user_id": KITE_USER_ID,
+            "request_id": request_id,
+            "twofa_value": twofa_code,
+            "twofa_type": "totp",
+            "skip_session": ""
+        },
+        timeout=15,
+    )
+    twofa_data = twofa_resp.json()
+    if twofa_data.get("status") != "success":
+        raise Exception(f"Zerodha 2FA Failed: {twofa_data.get('message', twofa_resp.text)}")
+
+    print("Obtaining Kite Connect request_token...")
+    auth_url = f"https://kite.zerodha.com/connect/login?api_key={KITE_API_KEY}&v=3"
+    auth_resp = session.get(auth_url, allow_redirects=True, timeout=20)
+
+    request_token = None
+    parsed = urlparse(auth_resp.url)
+    qs = parse_qs(parsed.query)
+    if "request_token" in qs:
+        request_token = qs["request_token"][0]
+    else:
+        for r in auth_resp.history:
+            loc = r.headers.get("Location", "")
+            loc_qs = parse_qs(urlparse(loc).query)
+            if "request_token" in loc_qs:
+                request_token = loc_qs["request_token"][0]
+                break
+
+    if not request_token:
+        raise Exception(f"Could not extract request_token from redirect: {auth_resp.url}")
+
+    print("Generating today's fresh Kite access token...")
+    kite = KiteConnect(api_key=KITE_API_KEY)
+    session_data = kite.generate_session(request_token, api_secret=KITE_API_SECRET)
+    return session_data["access_token"]
+
+
+# ---------------------------------------------------------------------------
+# 3. HOLDINGS (Zerodha Kite Connect)
 # ---------------------------------------------------------------------------
 def get_holdings():
     """
-    Fetches your current holdings from Zerodha via Kite Connect.
-    Requires KITE_API_KEY and a valid, same-day KITE_ACCESS_TOKEN.
+    Fetches your current holdings from Zerodha. Automatically refreshes
+    the access token if missing or expired.
     """
     from kiteconnect import KiteConnect
 
-    if not KITE_API_KEY or not KITE_ACCESS_TOKEN:
-        print("Kite not configured (missing API key or access token).")
-        return None
+    token = None
+    # If a valid session token exists and is not a 32-char TOTP secret, try it
+    if KITE_ACCESS_TOKEN and len(KITE_ACCESS_TOKEN) == 32 and not KITE_ACCESS_TOKEN.isupper():
+        try:
+            kite = KiteConnect(api_key=KITE_API_KEY)
+            kite.set_access_token(KITE_ACCESS_TOKEN)
+            return kite.holdings()
+        except Exception:
+            print("Existing access token expired. Performing automated login...")
 
+    # Generate fresh access token automatically
+    token = generate_kite_access_token()
     kite = KiteConnect(api_key=KITE_API_KEY)
-    kite.set_access_token(KITE_ACCESS_TOKEN)
-    return kite.holdings()  # returns a list of dicts
+    kite.set_access_token(token)
+    return kite.holdings()
 
 
 def format_holdings(holdings: list) -> str:
     if not holdings:
-        return "No holdings data available (check Kite API credentials)."
+        return "No holdings data available."
 
-    lines = ["<b>💼 Your Current Holdings</b>", ""]
+    lines = ["<b>💼 Your Current Holdings (Zerodha)</b>", ""]
     total_invested = 0
     total_current = 0
 
@@ -168,15 +229,8 @@ def run():
         holdings = get_holdings()
         send_telegram_message(format_holdings(holdings))
     except Exception as e:
-        send_telegram_message(f"⚠️ Holdings check failed: {e}")
+        send_telegram_message(f"⚠️ Zerodha Holdings check failed: {e}")
 
 
 if __name__ == "__main__":
     run()
-
-    # --- Optional: run on a schedule instead of a cron job ---
-    # from apscheduler.schedulers.blocking import BlockingScheduler
-    # scheduler = BlockingScheduler(timezone="Asia/Kolkata")
-    # scheduler.add_job(run, "cron", day_of_week="mon-fri", hour=11, minute=0)
-    # scheduler.add_job(run, "cron", day_of_week="mon-fri", hour=16, minute=0)
-    # scheduler.start()
