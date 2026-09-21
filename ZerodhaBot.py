@@ -229,7 +229,8 @@ def run():
         holdings = get_holdings()
         send_telegram_message(format_holdings(holdings))
     except Exception as e:
-        send_telegram_message(f"⚠️ Zerodha Holdings check failed: {e}")
+        print(f"[SECURITY] Zerodha Holdings check failed: {e}")
+        send_telegram_message("⚠️ Zerodha Holdings check failed. Please check local logs.")
 
 
 if __name__ == "__main__":

@@ -247,6 +247,21 @@ def refresh_dhan_access_token():
 def get_holdings():
     from dhanhq import DhanContext, dhanhq
 
+    access_token = os.getenv("DHAN_ACCESS_TOKEN")
+
+    # If static access token is provided, test it first
+    if access_token and DHAN_CLIENT_ID:
+        try:
+            dhan_context = DhanContext(DHAN_CLIENT_ID, access_token)
+            dhan = dhanhq(dhan_context)
+            resp = dhan.get_holdings()
+            if isinstance(resp, dict) and resp.get("status") != "failure":
+                return resp.get("data", [])
+            print("[INFO] Static DHAN_ACCESS_TOKEN is expired or invalid. Falling back to PIN + TOTP refresh...")
+        except Exception:
+            pass
+
+    # Automatically refresh access token using PIN + TOTP
     access_token = refresh_dhan_access_token()
     if not access_token or not DHAN_CLIENT_ID:
         return None
@@ -256,6 +271,10 @@ def get_holdings():
 
     response = dhan.get_holdings()
     if isinstance(response, dict):
+        if response.get("status") == "failure":
+            error_msg = response.get("remarks", {}).get("error_message", response)
+            print(f"[SECURITY] Dhan API error: {error_msg}")
+            return None
         return response.get("data", [])
     return response
 
@@ -313,13 +332,15 @@ def run():
         holdings = get_holdings()
         send_telegram_message(format_holdings(holdings))
     except Exception as e:
-        send_telegram_message(f"⚠️ Holdings check failed: {e}")
+        print(f"[SECURITY] Dhan Holdings error: {e}")
+        send_telegram_message("⚠️ Holdings check failed. Please check local logs.")
 
     try:
         results = scan_screener(SCREENER_URL)
         send_telegram_message(format_screener_results(results))
     except Exception as e:
-        send_telegram_message(f"⚠️ Screener scan failed: {e}")
+        print(f"[SECURITY] Screener scan error: {e}")
+        send_telegram_message("⚠️ Screener scan failed. Please check local logs.")
 
 
 if __name__ == "__main__":
