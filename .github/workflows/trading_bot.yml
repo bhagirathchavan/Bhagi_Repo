@@ -2,17 +2,17 @@ name: Scheduled Trading Bot Updates
 
 on:
   schedule:
-    # 05:03 UTC = 10:33 AM IST (Monday to Friday) - Screener & Morning Check
+    # 05:03 UTC = 10:33 AM IST (Monday to Friday) - Morning Check
     - cron: '3 5 * * 1-5'
 
-    # 10:17 UTC = 03:47 PM IST (Monday to Friday) - Mid-Day Holdings Update
+    # 10:17 UTC = 03:47 PM IST (Monday to Friday) - Post-Market Holdings Update
     - cron: '17 10 * * 1-5'
   workflow_dispatch:
     inputs:
       bot_to_run:
         description: 'Choose which bot to run manually'
         required: true
-        default: 'dhan'
+        default: 'both'
         type: choice
         options:
           - dhan
@@ -48,11 +48,14 @@ jobs:
           uv run DhanBotnotokennew.py
 
       - name: Run Zerodha Bot
-        if: "${{ inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'both' }}"
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'both' }}"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KITE_USER_ID: ${{ secrets.KITE_USER_ID }}
+          KITE_PASSWORD: ${{ secrets.KITE_PASSWORD }}
           KITE_API_KEY: ${{ secrets.KITE_API_KEY }}
-          KITE_ACCESS_TOKEN: ${{ secrets.KITE_ACCESS_TOKEN }}
+          KITE_API_SECRET: ${{ secrets.KITE_API_SECRET }}
+          KITE_TOTP_SECRET: ${{ secrets.KITE_TOTP_SECRET }}
         run: |
           uv run ZerodhaBot.py
