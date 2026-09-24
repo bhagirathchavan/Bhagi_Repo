@@ -101,9 +101,13 @@ def generate_kite_access_token() -> str:
         data={"user_id": KITE_USER_ID, "password": KITE_PASSWORD},
         timeout=15,
     )
-    login_data = login_resp.json()
+    try:
+        login_data = login_resp.json()
+    except Exception:
+        raise Exception(f"Zerodha Login returned HTTP {login_resp.status_code}: {login_resp.text[:200]}")
+
     if login_data.get("status") != "success":
-        raise Exception(f"Zerodha Login Failed: {login_data.get('message', login_resp.text)}")
+        raise Exception(f"Zerodha Login Failed: {login_data.get('message', login_resp.text[:200])}")
 
     request_id = login_data["data"]["request_id"]
 
@@ -124,9 +128,13 @@ def generate_kite_access_token() -> str:
         },
         timeout=15,
     )
-    twofa_data = twofa_resp.json()
+    try:
+        twofa_data = twofa_resp.json()
+    except Exception:
+        raise Exception(f"Zerodha 2FA returned HTTP {twofa_resp.status_code}: {twofa_resp.text[:200]}")
+
     if twofa_data.get("status") != "success":
-        raise Exception(f"Zerodha 2FA Failed: {twofa_data.get('message', twofa_resp.text)}")
+        raise Exception(f"Zerodha 2FA Failed: {twofa_data.get('message', twofa_resp.text[:200])}")
 
     print("Obtaining Kite Connect request_token...")
     auth_url = f"https://kite.zerodha.com/connect/login?api_key={KITE_API_KEY}&v=3"
@@ -225,12 +233,28 @@ def format_holdings(holdings: list) -> str:
 def run():
     _debug_env_status()
 
+    # Explicit check for missing credentials
+    missing = [
+        var for var, val in {
+            "KITE_USER_ID": KITE_USER_ID,
+            "KITE_PASSWORD": KITE_PASSWORD,
+            "KITE_API_KEY": KITE_API_KEY,
+            "KITE_API_SECRET": KITE_API_SECRET,
+            "KITE_TOTP_SECRET": KITE_TOTP_SECRET,
+        }.items() if not val
+    ]
+    if missing:
+        msg = f"⚠️ Zerodha error: Missing secret(s) in GitHub Actions: {', '.join(missing)}"
+        print(f"[ERROR] {msg}")
+        send_telegram_message(msg)
+        return
+
     try:
         holdings = get_holdings()
         send_telegram_message(format_holdings(holdings))
     except Exception as e:
         print(f"[SECURITY] Zerodha Holdings check failed: {e}")
-        send_telegram_message("⚠️ Zerodha Holdings check failed. Please check local logs.")
+        send_telegram_message(f"⚠️ Zerodha Holdings check failed: {e}")
 
 
 if __name__ == "__main__":
