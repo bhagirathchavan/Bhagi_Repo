@@ -2,22 +2,23 @@ name: Scheduled Trading Bot Updates
 
 on:
   schedule:
-    # 05:03 UTC = 10:33 AM IST (Monday to Friday) - Morning Check
-    - cron: '3 5 * * 1-5'
+    # 04:33 AM UTC = 10:03 AM IST (Monday to Friday) - Morning Check
+    - cron: '33 4 * * 1-5'
 
-    # 10:17 UTC = 03:47 PM IST (Monday to Friday) - Post-Market Holdings Update
-    - cron: '17 10 * * 1-5'
+    # 10:33 AM UTC = 04:03 PM IST (Monday to Friday) - Post-Market Holdings Update
+    - cron: '33 10 * * 1-5'
   workflow_dispatch:
     inputs:
       bot_to_run:
         description: 'Choose which bot to run manually'
         required: true
-        default: 'both'
+        default: 'all'
         type: choice
         options:
+          - all
           - dhan
           - zerodha
-          - both
+          - nselens
 
 jobs:
   run-bots:
@@ -36,19 +37,18 @@ jobs:
         run: uv python install 3.12
 
       - name: Run Dhan Bot
-        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'dhan' || inputs.bot_to_run == 'both' }}"
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'dhan' || inputs.bot_to_run == 'all' || inputs.bot_to_run == 'both' }}"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
           DHAN_PIN: ${{ secrets.DHAN_PIN }}
           DHAN_TOTP_SECRET: ${{ secrets.DHAN_TOTP_SECRET }}
-          SCREENER_URL: ${{ secrets.SCREENER_URL }}
         run: |
           uv run DhanBot.py
 
       - name: Run Zerodha Bot
-        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'both' }}"
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'all' || inputs.bot_to_run == 'both' }}"
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -59,3 +59,17 @@ jobs:
           KITE_TOTP_SECRET: ${{ secrets.KITE_TOTP_SECRET }}
         run: |
           uv run ZerodhaBot.py
+
+      - name: Install Playwright Browsers
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'nselens' || inputs.bot_to_run == 'all' || inputs.bot_to_run == 'both' }}"
+        run: |
+          uv run python -m playwright install --with-deps chromium
+
+      - name: Run NSE Lens Bot
+        if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'nselens' || inputs.bot_to_run == 'all' || inputs.bot_to_run == 'both' }}"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NSE_MARKETLENS_URL: ${{ secrets.NSE_MARKETLENS_URL }}
+        run: |
+          uv run NSELensBot.py
