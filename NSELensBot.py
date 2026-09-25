@@ -142,7 +142,7 @@ def send_telegram_message(text: str):
 # ---------------------------------------------------------------------------
 # 2. NSE MARKET LENS SCAN (Playwright - real browser required)
 # ---------------------------------------------------------------------------
-def scan_nse_marketlens(url: str, timeout_ms: int = 30000):
+def scan_nse_marketlens(url: str, timeout_ms: int = 60000):
     """
     Loads your saved NSE Market Lens screen in a real (headless) browser,
     waits for the filtered results to load, then clicks Export and reads
@@ -164,16 +164,20 @@ def scan_nse_marketlens(url: str, timeout_ms: int = 30000):
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080},
+            extra_http_headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
             accept_downloads=True,
         )
         page = context.new_page()
 
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.goto(url, wait_until="commit", timeout=timeout_ms)
 
-            # Give the SPA a moment to apply filters from the URL token and
-            # fetch matching stocks from NSE's backend.
-            page.wait_for_timeout(6000)
+            # Wait specifically for the Export button to appear on the page
+            page.wait_for_selector("text=Export", timeout=timeout_ms)
+            page.wait_for_timeout(3000)
 
             with tempfile.TemporaryDirectory() as tmp_dir:
                 # Click "Export" and capture the resulting file download.
