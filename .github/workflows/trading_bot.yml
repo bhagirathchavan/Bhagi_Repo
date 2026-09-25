@@ -3,10 +3,10 @@ name: Scheduled Trading Bot Updates
 on:
   schedule:
     # 04:33 AM UTC = 10:03 AM IST (Monday to Friday) - Morning Check
-    - cron: '33 4 * * 1-5'
+    #- cron: '33 4 * * 1-5'
 
     # 10:33 AM UTC = 04:03 PM IST (Monday to Friday) - Post-Market Holdings Update
-    - cron: '33 10 * * 1-5'
+    #- cron: '33 10 * * 1-5'
   workflow_dispatch:
     inputs:
       bot_to_run:
