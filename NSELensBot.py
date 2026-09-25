@@ -81,7 +81,7 @@ NSE_MARKETLENS_URL = os.getenv("NSE_MARKETLENS_URL", "")
 # headless is required for unattended/scheduled runs on a server.
 HEADLESS = True
 
-MAX_ROWS_IN_MESSAGE = 20
+MAX_ROWS_IN_MESSAGE = 10
 
 
 def _debug_env_status():
@@ -207,27 +207,32 @@ def format_nse_results(results: list) -> str:
     if not results:
         return "No stocks matched your NSE Market Lens filters today."
 
-    lines = ["<b>📊 NSE Market Lens Scan Results</b>", ""]
     shown = results[:MAX_ROWS_IN_MESSAGE]
+    lines = [f"<b>📊 NSE Market Lens Scan (Top {len(shown)} of {len(results)})</b>", ""]
 
     for i, r in enumerate(shown, 1):
-        # Try common column name variants for the stock's name/symbol
-        name = None
-        for key in ("Company", "Symbol", "Name", "Stock"):
-            if key in r and r[key]:
-                name = r[key]
-                break
-        name = html.escape(str(name or "Unknown"))
+        name = html.escape(str(r.get("Company", r.get("Symbol", r.get("Name", "Unknown")))))
+        sector = html.escape(str(r.get("Sector", "")))
+        mcap = html.escape(str(r.get("Market Cap", "")))
+        ret_1d = html.escape(str(r.get("1D Return (%)", "")))
+        pe = html.escape(str(r.get("PE Ratio", "")))
 
-        row_text = " | ".join(
+        details = []
+        if sector:
+            details.append(f"Sector: {sector}")
+        if mcap:
+            details.append(f"MCap: {mcap}")
+        if ret_1d:
+            details.append(f"1D: {ret_1d}%")
+        if pe:
+            details.append(f"P/E: {pe}")
+
+        details_str = " | ".join(details) if details else " | ".join(
             f"{html.escape(str(k))}: {html.escape(str(v))}"
-            for k, v in r.items()
+            for k, v in list(r.items())[:4]
             if k not in ("Company", "Symbol", "Name", "Stock")
         )
-        lines.append(f"{i}. <b>{name}</b> - {row_text}")
-
-    if len(results) > MAX_ROWS_IN_MESSAGE:
-        lines.append(f"\n...and {len(results) - MAX_ROWS_IN_MESSAGE} more (see the full CSV export).")
+        lines.append(f"{i}. <b>{name}</b>\n    {details_str}")
 
     return "\n".join(lines)
 
