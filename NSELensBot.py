@@ -154,7 +154,7 @@ def scan_nse_marketlens(url: str, timeout_ms: int = 30000):
     import sys
     from playwright.sync_api import sync_playwright
 
-    launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
+    launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-http2"]
     launch_kwargs = {"headless": HEADLESS, "args": launch_args}
     if sys.platform == "win32":
         launch_kwargs["channel"] = "msedge"
