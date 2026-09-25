@@ -45,7 +45,7 @@ jobs:
           DHAN_TOTP_SECRET: ${{ secrets.DHAN_TOTP_SECRET }}
           SCREENER_URL: ${{ secrets.SCREENER_URL }}
         run: |
-          uv run DhanBotnotokennew.py
+          uv run DhanBot.py
 
       - name: Run Zerodha Bot
         if: "${{ github.event_name == 'schedule' || inputs.bot_to_run == 'zerodha' || inputs.bot_to_run == 'both' }}"
