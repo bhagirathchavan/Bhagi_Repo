@@ -53,6 +53,7 @@ def register_bot_commands():
         {"command": "holdings", "description": "Get holdings from both Zerodha & Dhan"},
         {"command": "zerodha", "description": "Get Zerodha holdings only"},
         {"command": "dhan", "description": "Get Dhan holdings only"},
+        {"command": "nselens", "description": "Scan NSE Market Lens screen"},
         {"command": "help", "description": "Show available bot commands"},
     ]
     try:
@@ -93,6 +94,18 @@ def handle_dhan() -> str:
         return "⚠️ <b>Dhan Holdings:</b> Unable to fetch holdings. Please verify your credentials."
 
 
+def handle_nselens() -> str:
+    """Scans NSE Market Lens and formats results."""
+    try:
+        import NSELensBot
+
+        results = NSELensBot.scan_nse_marketlens(NSELensBot.NSE_MARKETLENS_URL)
+        return NSELensBot.format_nse_results(results)
+    except Exception as e:
+        print(f"[SECURITY] NSE Market Lens Error: {e}")
+        return f"⚠️ <b>NSE Market Lens Scan:</b> {e}"
+
+
 def handle_both_holdings(chat_id: str | int):
     """Fetches and returns holdings from both Zerodha and Dhan."""
     send_message(chat_id, "⏳ <i>Fetching holdings from Zerodha and Dhan...</i>")
@@ -124,13 +137,18 @@ def process_command(chat_id: int | str, command: str):
         send_message(chat_id, "⏳ <i>Fetching Dhan holdings...</i>")
         send_message(chat_id, handle_dhan())
 
+    elif cmd in ("/nselens", "nselens", "/lens", "lens"):
+        send_message(chat_id, "⏳ <i>Scanning NSE Market Lens (launching browser)...</i>")
+        send_message(chat_id, handle_nselens())
+
     elif cmd in ("/start", "/help", "help"):
         help_msg = (
             "<b>🤖 Trading Bot Command Menu</b>\n\n"
-            "Use the commands below to check your portfolio:\n\n"
+            "Use the commands below to check your portfolio & market scans:\n\n"
             "🔹 <b>/holdings</b> - Returns holdings from <b>BOTH</b> Zerodha & Dhan\n"
             "🔹 <b>/zerodha</b>  - Returns <b>Zerodha</b> holdings only\n"
             "🔹 <b>/dhan</b>     - Returns <b>Dhan</b> holdings only\n"
+            "🔹 <b>/nselens</b>  - Scans <b>NSE Market Lens</b> screen\n"
             "🔹 <b>/help</b>     - Show this help menu"
         )
         send_message(chat_id, help_msg)
