@@ -82,12 +82,12 @@ def handle_zerodha() -> str:
 def handle_dhan() -> str:
     """Fetches and formats Dhan holdings without leaking credentials in errors."""
     try:
-        import DhanBotnotokennew
+        import DhanBot
 
-        holdings = DhanBotnotokennew.get_holdings()
+        holdings = DhanBot.get_holdings()
         if not holdings:
             return "<b>💼 Dhan Holdings</b>\nNo holdings data available. Please verify your Dhan credentials or TOTP."
-        return DhanBotnotokennew.format_holdings(holdings)
+        return DhanBot.format_holdings(holdings)
     except Exception as e:
         print(f"[SECURITY] Dhan Holdings Error: {e}")
         return "⚠️ <b>Dhan Holdings:</b> Unable to fetch holdings. Please verify your credentials."

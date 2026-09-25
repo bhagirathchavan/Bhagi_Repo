@@ -1,13 +1,12 @@
 """
-Stock Runner: Telegram bot updates for
-  1) Screener.in scan (a screen you saved on screener.in)
-  2) Your current holdings (via Dhan API), with automatic PIN+TOTP token refresh
+Stock Runner: Telegram bot updates for your current holdings (via Dhan
+API), with automatic PIN+TOTP token refresh and a static-token fallback.
 
 RUNNING WITH UV (recommended - handles dependencies automatically)
 --------------------------------------------------------------
 This file declares its own dependencies below (the "# /// script" block).
 Just run:
-    uv run DhanBotnotoken.py
+    uv run DhanBot.py
 uv will create an isolated environment with the right packages installed
 the first time you run it - no need for `pip install` or `uv add` at all.
 
@@ -19,7 +18,6 @@ SETUP
 # requires-python = ">=3.9"
 # dependencies = [
 #     "requests",
-#     "beautifulsoup4",
 #     "dhanhq",
 #     "pyotp",
 #     "python-dotenv",
@@ -36,22 +34,13 @@ SETUP
       changes every 30 seconds - your script needs the permanent secret)
     Docs: https://dhanhq.co/docs/v2/authentication/
 
-2. Create your screen on screener.in (one-time):
-    - Log in to screener.in in your browser
-    - Click "Create New Screen" and paste your query:
-        Promoter holding > 70 AND FII holding > 3.5 AND Market Capitalization < 10000
-    - Click "Save Query", give it a name
-    - Copy the resulting URL, e.g. https://www.screener.in/screens/123456/my-screen/
-      (free-text queries need a login and 404 for anonymous requests -
-      a SAVED screen's URL is public and needs no login to scrape)
-
-3. Create a .env file in the SAME folder you run the script from:
+2. Create a .env.dhan file in the SAME folder you run the script from:
     TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
     TELEGRAM_CHAT_ID=123456789
     DHAN_CLIENT_ID=1000000401
     DHAN_PIN=your_6_digit_dhan_pin
     DHAN_TOTP_SECRET=your_base32_totp_secret
-    SCREENER_URL=https://www.screener.in/screens/123456/my-screen/
+    DHAN_ACCESS_TOKEN=optional_static_token   # tried first, auto-refreshed if expired/missing
 
    No quotes around values, no spaces inside DHAN_TOTP_SECRET.
 
@@ -60,15 +49,14 @@ SETUP
    file like your banking password - restrict its file permissions, never
    commit it to git, never store it on a shared/public machine.
 
-4. Run:
-    uv run DhanBotnotoken.py
+3. Run:
+    uv run DhanBot.py
 """
 
 import os
 import html
 import requests
 import pyotp
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path="./.env.dhan")
@@ -83,9 +71,6 @@ DHAN_PIN = os.getenv("DHAN_PIN")
 # generated fresh, at the moment it's used, inside refresh_dhan_access_token().
 DHAN_TOTP_SECRET = os.getenv("DHAN_TOTP_SECRET")
 
-# Public URL of a screen YOU created and saved on screener.in.
-SCREENER_URL = os.getenv("SCREENER_URL", "")
-
 
 def _debug_env_status():
     checks = {
@@ -94,12 +79,11 @@ def _debug_env_status():
         "DHAN_CLIENT_ID": DHAN_CLIENT_ID,
         "DHAN_PIN": DHAN_PIN,
         "DHAN_TOTP_SECRET": DHAN_TOTP_SECRET,
-        "SCREENER_URL": SCREENER_URL,
     }
-    print("--- .env load check ---")
+    print("--- .env.dhan load check ---")
     for k, v in checks.items():
         print(f"  {k}: {'loaded' if v else 'MISSING'}")
-    print("-----------------------")
+    print("-----------------------------")
 
 
 # ---------------------------------------------------------------------------
@@ -123,87 +107,7 @@ def send_telegram_message(text: str):
 
 
 # ---------------------------------------------------------------------------
-# 2. SCREENER.IN SCAN
-# ---------------------------------------------------------------------------
-def scan_screener(screen_url: str, max_results: int = 20):
-    """
-    Scrapes a screen YOU already created and saved on screener.in.
-
-    Robust approach: rather than relying on an exact table class name
-    (which may not match, and screener.in also repeats header rows
-    mid-table on long screens), this finds the results table structurally:
-    - grabs column labels from the first row of <th> cells
-    - treats any <tr> containing a company link (<a>) as a real data row,
-      which naturally skips repeated header rows that lack a link
-    """
-    if not screen_url:
-        raise ValueError(
-            "SCREENER_URL is not set. Create and save your screen on "
-            "screener.in first, then put its URL in .env."
-        )
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    }
-
-    resp = requests.get(screen_url, headers=headers, timeout=20)
-    resp.raise_for_status()
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    table = soup.find("table")
-
-    if table is None:
-        raise ValueError(
-            "No results table found on the page. Double-check SCREENER_URL "
-            "points to a real saved screen (paste it in a browser to confirm "
-            "it shows a stock list, not a login page or an empty screen)."
-        )
-
-    header_cells = table.find("tr")
-    column_labels = (
-        [th.get_text(strip=True) for th in header_cells.find_all("th")]
-        if header_cells else []
-    )
-
-    results = []
-    for row in table.find_all("tr"):
-        cells = row.find_all("td")
-        if not cells:
-            continue  # header-only row, skip
-        if not row.find("a"):
-            continue  # repeated header row lacking a company link, skip
-        values = [c.get_text(strip=True) for c in cells]
-        if column_labels and len(column_labels) == len(values):
-            record = dict(zip(column_labels, values))
-        else:
-            record = {f"Col{i+1}": v for i, v in enumerate(values)}
-        results.append(record)
-        if len(results) >= max_results:
-            break
-
-    return results
-
-
-def format_screener_results(results: list) -> str:
-    if not results:
-        return "No stocks matched the screener query today."
-
-    lines = ["<b>📊 Screener.in Scan Results</b>", ""]
-    for i, r in enumerate(results, 1):
-        # screener.in labels the company column "Company" (or "Name" on
-        # some screen layouts) - check both
-        name = html.escape(str(r.get("Company", r.get("Name", "Unknown"))))
-        row_text = " | ".join(
-            f"{html.escape(str(k))}: {html.escape(str(v))}"
-            for k, v in r.items() if k not in ("Company", "Name", "S.No.")
-        )
-        lines.append(f"{i}. <b>{name}</b> - {row_text}")
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# 3. AUTO TOKEN REFRESH (PIN + TOTP)
+# 2. AUTO TOKEN REFRESH (PIN + TOTP)
 # ---------------------------------------------------------------------------
 def refresh_dhan_access_token():
     """
@@ -242,7 +146,7 @@ def refresh_dhan_access_token():
 
 
 # ---------------------------------------------------------------------------
-# 4. HOLDINGS (Dhan API)
+# 3. HOLDINGS (Dhan API)
 # ---------------------------------------------------------------------------
 def get_holdings():
     from dhanhq import DhanContext, dhanhq
@@ -334,13 +238,6 @@ def run():
     except Exception as e:
         print(f"[SECURITY] Dhan Holdings error: {e}")
         send_telegram_message("⚠️ Holdings check failed. Please check local logs.")
-
-    try:
-        results = scan_screener(SCREENER_URL)
-        send_telegram_message(format_screener_results(results))
-    except Exception as e:
-        print(f"[SECURITY] Screener scan error: {e}")
-        send_telegram_message("⚠️ Screener scan failed. Please check local logs.")
 
 
 if __name__ == "__main__":
